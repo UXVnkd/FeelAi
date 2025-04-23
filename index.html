@@ -132,6 +132,18 @@
         border-right: 20px solid transparent;
         border-bottom: 50px solid green;
       }
+      #debug-info {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        max-width: 300px;
+        z-index: 100;
+      }
     </style>
   </head>
   <body>
@@ -172,6 +184,8 @@
       <div id="compass-text">Direction</div>
     </div>
     
+    <div id="debug-info"></div>
+    
     <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
       <a-assets>
         <img id="gift-texture" src="gift.png">
@@ -180,8 +194,8 @@
       <a-image
         id="gift-entity"
         src="#gift-texture"
-        width="2"
-        height="2"
+        width="4"
+        height="4"
         look-at="[camera]"
         gps-entity-place
         class="clickable"
@@ -198,6 +212,7 @@
       let currentHeading = 0;
       let currentLocation = null;
       let giftImageURL = null;
+      const SHOW_DISTANCE_THRESHOLD = 5; // Show gift when within 5 meters
       
       // Set up click event for the AR gift
       const giftEntity = document.getElementById('gift-entity');
@@ -275,7 +290,7 @@
         // Set AR target coordinates
         const giftEntity = document.getElementById('gift-entity');
         giftEntity.setAttribute('gps-entity-place', `latitude: ${targetLocation.latitude}; longitude: ${targetLocation.longitude}`);
-        giftEntity.setAttribute('visible', 'true');
+        giftEntity.setAttribute('visible', 'false'); // Start with gift invisible
         
         // Initialize device orientation
         initDeviceOrientation();
@@ -342,7 +357,28 @@
           const distance = calculateDistance(latitude, longitude, targetLocation.latitude, targetLocation.longitude);
           const bearing = calculateBearing(latitude, longitude, targetLocation.latitude, targetLocation.longitude);
           
+          // Log for debugging
+          const debugInfo = document.getElementById('debug-info');
+          debugInfo.innerHTML = `
+            Current: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>
+            Target: ${targetLocation.latitude.toFixed(6)}, ${targetLocation.longitude.toFixed(6)}<br>
+            Distance: ${distance.toFixed(1)}m<br>
+            Gift visible: ${distance <= SHOW_DISTANCE_THRESHOLD ? 'Yes' : 'No'}
+          `;
+          
           updateUI(distance, bearing);
+          
+          // Show/hide gift based on distance
+          const giftEntity = document.getElementById('gift-entity');
+          if (distance <= SHOW_DISTANCE_THRESHOLD) {
+            // Show the gift when user is within threshold
+            giftEntity.setAttribute('visible', 'true');
+            document.getElementById('status-message').textContent = `You're close! Distance: ${distance.toFixed(1)}m`;
+          } else {
+            // Hide the gift when user is further than threshold
+            giftEntity.setAttribute('visible', 'false');
+            document.getElementById('status-message').textContent = `Distance: ${distance.toFixed(1)}m | Target Bearing: ${bearing.toFixed(1)}°`;
+          }
         }
       }
       
@@ -368,9 +404,6 @@
       }
       
       function updateUI(distance, bearing) {
-        const statusMessage = document.getElementById('status-message');
-        statusMessage.textContent = `Distance: ${distance.toFixed(1)}m | Target Bearing: ${bearing.toFixed(1)}°`;
-        
         // Calculate relative bearing by subtracting current heading from target bearing
         const relativeBearing = (bearing - currentHeading + 360) % 360;
         
