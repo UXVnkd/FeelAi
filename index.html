@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AR Gift Placement App</title>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://cdn.rawgit.com/jeromeetienne/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        overflow: hidden;
+      }
+      #app-ui {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        padding: 10px 20px;
+        text-align: center;
+        background-color: rgba(255, 255, 255, 0.9);
+        z-index: 100;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+      #status-message {
+        font-size: 14px;
+        color: #555;
+        margin: 5px 0 0 0;
+      }
+      #input-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 15px 0;
+      }
+      .form-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        text-align: left;
+      }
+      label {
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+      input, button {
+        padding: 10px;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        width: 100%;
+      }
+      button {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-weight: bold;
+        margin-top: 10px;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      #greeting-popup {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background-color: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        z-index: 200;
+        max-width: 80%;
+        max-height: 80%;
+        display: none;
+        text-align: center;
+      }
+      #greeting-image {
+        max-width: 100%;
+        max-height: 60vh;
+        margin-bottom: 15px;
+      }
+      #close-popup {
+        background-color: #f44336;
+        color: white;
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-top: 10px;
+      }
+      #compass {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 150px;
+        height: 150px;
+        border: 5px solid #333;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #compass-pointer {
+        position: absolute;
+        width: 100px;
+        height: 4px;
+        background-color: red;
+        transform-origin: bottom center;
+        transform: rotate(0deg);
+      }
+      #compass-text {
+        position: absolute;
+        top: 60%;
+        text-align: center;
+        font-size: 16px;
+        font-weight: bold;
+        color: #333;
+      }
+      #destination-arrow {
+        position: fixed;
+        bottom: 200px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 20px solid transparent;
+        border-right: 20px solid transparent;
+        border-bottom: 50px solid green;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app-ui">
+      <h2>AR Gift Placement</h2>
+      <p id="status-message">Enter coordinates and upload a gift image</p>
+      
+      <form id="input-form">
+        <div class="form-group">
+          <label for="latitude">Latitude:</label>
+          <input type="number" id="latitude" step="any" required placeholder="e.g. 40.008427">
+        </div>
+        
+        <div class="form-group">
+          <label for="longitude">Longitude:</label>
+          <input type="number" id="longitude" step="any" required placeholder="e.g. -105.267626">
+        </div>
+        
+        <div class="form-group">
+          <label for="gift-image">Gift Image:</label>
+          <input type="file" id="gift-image" accept="image/*" required>
+        </div>
+        
+        <button type="button" onclick="requestPermissionsAndStartApp()">Start Navigation</button>
+      </form>
+    </div>
+    
+    <div id="greeting-popup">
+      <img id="greeting-image" src="default-greeting.jpg" alt="Greeting">
+      <h3>Congratulations!</h3>
+      <p>You found your special gift!</p>
+      <button id="close-popup">Close</button>
+    </div>
+    
+    <div id="destination-arrow"></div>
+    <div id="compass">
+      <div id="compass-pointer"></div>
+      <div id="compass-text">Direction</div>
+    </div>
+    
+    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+      <a-assets>
+        <img id="gift-texture" src="placeholder.png">
+      </a-assets>
+      
+      <a-image
+        id="gift-entity"
+        src="#gift-texture"
+        width="2"
+        height="2"
+        look-at="[camera]"
+        gps-entity-place
+        class="clickable"
+        visible="false">
+      </a-image>
+      
+      <a-camera gps-camera rotation-reader></a-camera>
+    </a-scene>
+    
+    <script>
+      let targetLocation = null;
+      let appStarted = false;
+      let watchId = null;
+      let currentHeading = 0;
+      let currentLocation = null;
+      let giftImageURL = null;
+      
+      // Set up click event for the AR gift
+      const giftEntity = document.getElementById('gift-entity');
+      giftEntity.addEventListener('click', function() {
+        document.getElementById('greeting-popup').style.display = 'block';
+      });
+      
+      // Close popup button
+      document.getElementById('close-popup').addEventListener('click', function() {
+        document.getElementById('greeting-popup').style.display = 'none';
+      });
+      
+      // Handle gift image upload
+      document.getElementById('gift-image').addEventListener('change', function(event) {
+        const file = event.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            giftImageURL = e.target.result;
+            const giftTexture = document.getElementById('gift-texture');
+            giftTexture.src = giftImageURL;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+      
+      function requestPermissionsAndStartApp() {
+        // Get coordinates from input
+        const latitude = parseFloat(document.getElementById('latitude').value);
+        const longitude = parseFloat(document.getElementById('longitude').value);
+        
+        if (isNaN(latitude) || isNaN(longitude)) {
+          alert('Please enter valid coordinates');
+          return;
+        }
+        
+        if (!giftImageURL) {
+          alert('Please upload a gift image');
+          return;
+        }
+        
+        targetLocation = { latitude, longitude };
+        
+        // Request location permission
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(() => {
+            // Request device orientation permission (for iOS)
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+              DeviceOrientationEvent.requestPermission()
+                .then(response => {
+                  if (response === 'granted') {
+                    startApp();
+                  } else {
+                    alert('Device orientation permission denied');
+                  }
+                })
+                .catch(console.error);
+            } else {
+              // For browsers that don't require explicit permission
+              startApp();
+            }
+          }, onLocationError);
+        } else {
+          alert('Geolocation is not supported by this browser.');
+        }
+      }
+      
+      function startApp() {
+        if (appStarted) return;
+        
+        appStarted = true;
+        document.getElementById('input-form').style.display = 'none';
+        document.getElementById('status-message').textContent = 'Acquiring location...';
+        
+        // Set AR target coordinates
+        const giftEntity = document.getElementById('gift-entity');
+        giftEntity.setAttribute('gps-entity-place', `latitude: ${targetLocation.latitude}; longitude: ${targetLocation.longitude}`);
+        giftEntity.setAttribute('visible', 'true');
+        
+        // Initialize device orientation
+        initDeviceOrientation();
+        
+        // Start location tracking
+        watchId = navigator.geolocation.watchPosition(onLocationUpdate, onLocationError, {
+          enableHighAccuracy: true,
+          timeout: 20000,
+          maximumAge: 0,
+        });
+      }
+      
+      function initDeviceOrientation() {
+        if (window.DeviceOrientationEvent) {
+          window.addEventListener('deviceorientation', handleOrientation, false);
+        } else {
+          console.warn('Device orientation not supported');
+        }
+      }
+      
+      function handleOrientation(event) {
+        let heading;
+        
+        // Prefer the standard compass heading if available
+        if (event.webkitCompassHeading) {
+          // iOS devices
+          heading = event.webkitCompassHeading;
+        } else if (event.alpha !== null) {
+          // Most Android devices
+          // Convert from standard compass to true north
+          heading = 360 - event.alpha;
+        } else {
+          return;
+        }
+        
+        currentHeading = heading;
+        updateCompassUI(heading);
+        
+        // If we have both current location and target, update UI
+        if (currentLocation && targetLocation) {
+          const bearing = calculateBearing(
+            currentLocation.latitude, 
+            currentLocation.longitude, 
+            targetLocation.latitude, 
+            targetLocation.longitude
+          );
+          
+          const distance = calculateDistance(
+            currentLocation.latitude, 
+            currentLocation.longitude, 
+            targetLocation.latitude, 
+            targetLocation.longitude
+          );
+          
+          updateUI(distance, bearing);
+        }
+      }
+      
+      function onLocationUpdate(position) {
+        const { latitude, longitude } = position.coords;
+        currentLocation = { latitude, longitude };
+        
+        if (targetLocation) {
+          const distance = calculateDistance(latitude, longitude, targetLocation.latitude, targetLocation.longitude);
+          const bearing = calculateBearing(latitude, longitude, targetLocation.latitude, targetLocation.longitude);
+          
+          updateUI(distance, bearing);
+        }
+      }
+      
+      function onLocationError(error) {
+        document.getElementById('status-message').textContent = 'Error acquiring location.';
+        if (error.code === error.PERMISSION_DENIED) {
+          alert('Location services are disabled. Please enable them to use this app.');
+        }
+        console.error('Location Error: ', error);
+      }
+      
+      function updateCompassUI(heading) {
+        const compassPointer = document.getElementById('compass-pointer');
+        const compassText = document.getElementById('compass-text');
+        
+        // Rotate compass pointer
+        compassPointer.style.transform = `rotate(${-heading}deg)`;
+        
+        // Update direction text
+        const directions = ['North', 'North-East', 'East', 'South-East', 'South', 'South-West', 'West', 'North-West'];
+        const directionIndex = Math.round(heading / 45) % 8;
+        compassText.textContent = directions[directionIndex];
+      }
+      
+      function updateUI(distance, bearing) {
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.textContent = `Distance: ${distance.toFixed(1)}m | Target Bearing: ${bearing.toFixed(1)}°`;
+        
+        // Calculate relative bearing by subtracting current heading from target bearing
+        const relativeBearing = (bearing - currentHeading + 360) % 360;
+        
+        // Rotate destination arrow to point to the destination
+        const destinationArrow = document.getElementById('destination-arrow');
+        destinationArrow.style.transform = `translateX(-50%) rotate(${relativeBearing}deg)`;
+      }
+      
+      function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+      
+      function calculateBearing(lat1, lon1, lat2, lon2) {
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const lat1Rad = (lat1 * Math.PI) / 180;
+        const lat2Rad = (lat2 * Math.PI) / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2Rad);
+        const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+          Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+        return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      }
+    </script>
+  </body>
+</html>
